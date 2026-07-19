@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowUpRight, Bell, BookOpen, BriefcaseBusiness, ChevronDown, CircleUserRound, Landmark, LayoutDashboard, LogOut, Plus, Search, Settings, ShieldCheck, Sparkles, TrendingUp, WalletCards, X } from 'lucide-react'
 import { seedTransactions } from './data'
-import { findAssets, type AssetSuggestion } from './assetCatalog'
+import { findAssets, searchGlobalAssets, type AssetSuggestion } from './assetCatalog'
 import { observeAuth, signInWithGoogle, signOut, type AuthUser } from './firebase'
 import type { AssetType, Transaction } from './types'
 
@@ -196,13 +196,47 @@ function TransactionForm({onClose,onAdd}:{onClose:()=>void,onAdd:(t:Transaction)
   const [isin,setIsin]=useState('')
   const [selected,setSelected]=useState<AssetSuggestion|null>(null)
   const [searchOpen,setSearchOpen]=useState(false)
-  const suggestions=useMemo(()=>findAssets(query),[query])
+  const [suggestions,setSuggestions]=useState<AssetSuggestion[]>([])
+  const [searching,setSearching]=useState(false)
+  const [searchError,setSearchError]=useState('')
+
+  useEffect(()=>{
+    const value=query.trim()
+    if(value.length<3||selected){
+      setSuggestions([])
+      setSearching(false)
+      setSearchError('')
+      return
+    }
+
+    setSuggestions(findAssets(value,12))
+    setSearching(true)
+    setSearchError('')
+    const controller=new AbortController()
+    let active=true
+    const timer=window.setTimeout(()=>{
+      searchGlobalAssets(value,controller.signal)
+        .then(results=>active&&setSuggestions(results))
+        .catch(error=>{
+          if(!active)return
+          if(error instanceof DOMException&&error.name==='AbortError')return
+          setSearchError('No se pudo consultar el catálogo mundial. Puedes continuar manualmente.')
+        })
+        .finally(()=>active&&setSearching(false))
+    },350)
+
+    return()=>{
+      active=false
+      window.clearTimeout(timer)
+      controller.abort()
+    }
+  },[query,selected])
 
   const selectAsset=(asset:AssetSuggestion)=>{
     setSelected(asset)
     setQuery(asset.name)
     setSymbol(asset.symbol)
-    setIsin(asset.isin)
+    setIsin(asset.isin||'')
     setType(asset.type)
     setSearchOpen(false)
   }
@@ -226,11 +260,11 @@ function TransactionForm({onClose,onAdd}:{onClose:()=>void,onAdd:(t:Transaction)
       <label htmlFor="asset-search">Buscar activo</label>
       <div className={searchOpen&&canSuggest?'asset-search active':'asset-search'}><Search/><input id="asset-search" name="name" value={query} onChange={e=>changeQuery(e.target.value)} onFocus={()=>setSearchOpen(true)} autoComplete="off" required placeholder="Nombre, ticker o ISIN"/><span>{query.trim().length}/3</span></div>
       {searchOpen&&canSuggest&&<div className="asset-suggestions" role="listbox">
-        <div className="suggestion-caption"><span>Coincidencias verificadas</span><small>OpenFIGI</small></div>
-        {suggestions.length>0?suggestions.map(asset=><button type="button" role="option" key={asset.isin} onMouseDown={e=>e.preventDefault()} onClick={()=>selectAsset(asset)}><div className={`suggestion-icon ${asset.type.toLowerCase()}`}>{asset.type[0]}</div><div><strong>{asset.name}</strong><span>{asset.symbol} · {asset.isin}</span></div><small>{asset.type}<br/>{asset.market} · {asset.currency}</small></button>):<div className="no-suggestions"><Search/><div><strong>No está en el catálogo</strong><span>Puedes seguir y completar los datos manualmente.</span></div></div>}
+        <div className="suggestion-caption"><span>Cobertura mundial</span><small>{searching?'Buscando…':'Twelve Data + OpenFIGI'}</small></div>
+        {suggestions.length>0?suggestions.map(asset=><button type="button" role="option" key={`${asset.symbol}-${asset.market}-${asset.name}`} onMouseDown={e=>e.preventDefault()} onClick={()=>selectAsset(asset)}><div className={`suggestion-icon ${asset.type.toLowerCase()}`}>{asset.type[0]}</div><div><strong>{asset.name}</strong><span>{asset.symbol}{asset.isin?` · ${asset.isin}`:''}</span></div><small>{asset.type}<br/>{asset.market} · {asset.currency}</small></button>):searching?<div className="searching-assets"><span/><span/><span/></div>:<div className="no-suggestions"><Search/><div><strong>No está en el catálogo</strong><span>{searchError||'Puedes seguir y completar los datos manualmente.'}</span></div></div>}
       </div>}
       {!canSuggest&&!selected&&<p className="search-hint">Escribe al menos 3 caracteres para ver coincidencias.</p>}
-      {selected&&<div className="selected-asset"><ShieldCheck/><div><strong>Activo identificado</strong><span>{selected.symbol} · {selected.isin} · {selected.market}</span></div><button type="button" onClick={()=>{setSelected(null);setSearchOpen(true)}}>Cambiar</button></div>}
+      {selected&&<div className="selected-asset"><ShieldCheck/><div><strong>Activo identificado</strong><span>{selected.symbol}{selected.isin?` · ${selected.isin}`:''} · {selected.market}</span></div><button type="button" onClick={()=>{setSelected(null);setSearchOpen(true)}}>Cambiar</button></div>}
     </div>
     <label className="product-type-label">Tipo de producto<div className="type-tabs">{(['Fondo','ETF','Acción'] as AssetType[]).map(x=><button type="button" key={x} className={type===x?'selected':''} onClick={()=>setType(x)}>{x}</button>)}</div></label>
     <div className="form-grid asset-details"><label>Símbolo<input name="symbol" value={symbol} onChange={e=>setSymbol(e.target.value)} required placeholder="Ticker o código"/></label><label>ISIN <span>(opcional)</span><input name="isin" value={isin} onChange={e=>setIsin(e.target.value)} placeholder="ES... / IE..."/></label><label>Fecha de compra<input name="date" type="date" required/></label><label>Participaciones<input name="units" type="number" step="any" min="0.000001" required inputMode="decimal"/></label><label>Precio de compra (EUR)<input name="price" type="number" step="any" min="0" required inputMode="decimal"/></label><label>Precio actual (EUR)<input name="currentPrice" type="number" step="any" min="0" required inputMode="decimal"/></label></div>

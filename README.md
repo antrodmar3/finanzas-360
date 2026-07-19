@@ -16,7 +16,7 @@ El primer prototipo incluye:
 - publicación automática en GitHub Pages después de cada cambio en `main`.
 - acceso mediante cuenta de Google con Firebase Authentication;
 - sesión persistente y cartera local separada por usuario.
-- buscador de activos con coincidencias desde 3 caracteres y catálogo de identificadores validado con OpenFIGI.
+- buscador mundial desde 3 caracteres para acciones, ETF y fondos, conectado a Twelve Data y con respaldo local de identificadores validados mediante OpenFIGI.
 
 La aplicación no incluye posiciones, rentabilidades, noticias ni cotizaciones de demostración. Arranca vacía y solo muestra datos introducidos por el usuario o procedentes de proveedores reales.
 
@@ -52,7 +52,7 @@ La aplicación se abrirá sin la interfaz del navegador y conservará una copia 
 - **Cloud Firestore:** perfiles, carteras y operaciones por usuario.
 - **Firebase Functions:** proxy privado, normalización y caché de proveedores.
 - **Alpha Vantage:** primera opción gratuita para búsqueda, series diarias y noticias.
-- **Twelve Data:** proveedor secundario, especialmente para ampliar la cobertura de fondos.
+- **Twelve Data:** búsqueda mundial de acciones, ETF y fondos en más de 50 países; se usa su acceso público de demostración durante el prototipo.
 - **Entrada manual:** respaldo cuando un fondo español no esté cubierto por una API gratuita.
 
 El modelo interno utiliza ISIN además del símbolo porque muchos fondos europeos no cuentan con un ticker universal.

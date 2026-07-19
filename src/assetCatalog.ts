@@ -3,16 +3,17 @@ import type { AssetType } from './types'
 export interface AssetSuggestion {
   name: string
   symbol: string
-  isin: string
+  isin?: string
   type: AssetType
-  currency: 'EUR' | 'USD'
+  currency: string
   market: string
+  source?: 'OpenFIGI' | 'Twelve Data'
 }
 
 // Identificadores contrastados con OpenFIGI. El catálogo sirve para rellenar
 // operaciones, no constituye una recomendación de inversión ni aporta precios.
 const assets: AssetSuggestion[] = [
-  { name: 'Vanguard Global Stock Index Fund EUR Acc', symbol: 'VANGLVI', isin: 'IE00B03HCZ61', type: 'Fondo', currency: 'EUR', market: 'Irlanda' },
+  { name: 'Vanguard Global Stock Index Fund EUR Acc', symbol: 'VANGLVI', isin: 'IE00B03HCZ61', type: 'Fondo', currency: 'EUR', market: 'Irlanda', source: 'OpenFIGI' },
   { name: 'Fidelity MSCI World Index Fund P-Acc-EUR', symbol: 'FIWIPAE', isin: 'IE00BYX5NX33', type: 'Fondo', currency: 'EUR', market: 'Irlanda' },
   { name: 'Amundi Index MSCI World AE-C', symbol: 'AMIEAEC', isin: 'LU0996182563', type: 'Fondo', currency: 'EUR', market: 'Luxemburgo' },
   { name: 'Fundsmith Equity Fund T EUR Acc', symbol: 'FSEQFTA', isin: 'LU0690375182', type: 'Fondo', currency: 'EUR', market: 'Luxemburgo' },
@@ -48,7 +49,7 @@ export function findAssets(query: string, limit = 6) {
     .map((asset) => {
       const name = normalize(asset.name)
       const symbol = normalize(asset.symbol)
-      const isin = normalize(asset.isin)
+      const isin = normalize(asset.isin || '')
       const score = symbol === term ? 0 : symbol.startsWith(term) ? 1 : name.startsWith(term) ? 2 : isin.startsWith(term) ? 3 : name.includes(term) ? 4 : symbol.includes(term) ? 5 : 99
       return { asset, score }
     })
@@ -56,4 +57,80 @@ export function findAssets(query: string, limit = 6) {
     .sort((a, b) => a.score - b.score || a.asset.name.localeCompare(b.asset.name, 'es'))
     .slice(0, limit)
     .map(({ asset }) => asset)
+}
+
+interface TwelveDataMatch {
+  symbol?: string
+  instrument_name?: string
+  exchange?: string
+  mic_code?: string
+  instrument_type?: string
+  country?: string
+  currency?: string
+}
+
+interface TwelveDataResponse {
+  data?: TwelveDataMatch[]
+  status?: string
+  message?: string
+}
+
+const searchCache = new Map<string, AssetSuggestion[]>()
+
+function mapType(instrumentType: string): AssetType | null {
+  if (instrumentType === 'ETF' || instrumentType === 'Exchange-Traded Note') return 'ETF'
+  if (instrumentType.includes('Fund')) return 'Fondo'
+  if (['Common Stock', 'Preferred Stock', 'American Depositary Receipt', 'Depositary Receipt', 'REIT', 'Trust'].includes(instrumentType)) return 'Acción'
+  return null
+}
+
+function scoreAsset(asset: AssetSuggestion, term: string) {
+  const name = normalize(asset.name)
+  const symbol = normalize(asset.symbol)
+  return symbol === term ? 0 : symbol.startsWith(term) ? 1 : name.startsWith(term) ? 2 : name.includes(term) ? 3 : 9
+}
+
+export async function searchGlobalAssets(query: string, signal?: AbortSignal) {
+  const term = normalize(query.trim())
+  if (term.length < 3) return []
+  const cached = searchCache.get(term)
+  if (cached) return cached
+
+  const local = findAssets(query, 12)
+  const url = new URL('https://api.twelvedata.com/symbol_search')
+  url.searchParams.set('symbol', query.trim())
+  url.searchParams.set('outputsize', '120')
+  url.searchParams.set('apikey', 'demo')
+
+  const response = await fetch(url, { signal })
+  if (!response.ok) throw new Error('El buscador mundial no está disponible en este momento.')
+  const payload = await response.json() as TwelveDataResponse
+  if (payload.status === 'error') throw new Error(payload.message || 'No se pudo completar la búsqueda mundial.')
+
+  const remote = (payload.data || []).flatMap((item): AssetSuggestion[] => {
+    const type = mapType(item.instrument_type || '')
+    if (!type || !item.symbol || !item.instrument_name) return []
+    return [{
+      name: item.instrument_name,
+      symbol: item.symbol,
+      type,
+      currency: item.currency || '—',
+      market: item.exchange || item.mic_code || item.country || 'Mercado global',
+      source: 'Twelve Data',
+    }]
+  })
+
+  const seen = new Set<string>()
+  const combined = [...local, ...remote]
+    .sort((a, b) => scoreAsset(a, term) - scoreAsset(b, term) || a.name.localeCompare(b.name, 'es'))
+    .filter((asset) => {
+      const key = `${normalize(asset.symbol)}|${normalize(asset.market)}|${normalize(asset.name)}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .slice(0, 16)
+
+  searchCache.set(term, combined)
+  return combined
 }
