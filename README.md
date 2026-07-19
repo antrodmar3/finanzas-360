@@ -16,6 +16,7 @@ El primer prototipo incluye:
 - publicación automática en GitHub Pages después de cada cambio en `main`.
 - acceso mediante cuenta de Google con Firebase Authentication;
 - sesión persistente y cartera local separada por usuario.
+- buscador de activos con coincidencias desde 3 caracteres y catálogo de identificadores validado con OpenFIGI.
 
 La aplicación no incluye posiciones, rentabilidades, noticias ni cotizaciones de demostración. Arranca vacía y solo muestra datos introducidos por el usuario o procedentes de proveedores reales.
 

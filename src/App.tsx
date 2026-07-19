@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowUpRight, Bell, BookOpen, BriefcaseBusiness, ChevronDown, CircleUserRound, Landmark, LayoutDashboard, LogOut, Plus, Search, Settings, ShieldCheck, Sparkles, TrendingUp, WalletCards, X } from 'lucide-react'
 import { seedTransactions } from './data'
+import { findAssets, type AssetSuggestion } from './assetCatalog'
 import { observeAuth, signInWithGoogle, signOut, type AuthUser } from './firebase'
 import type { AssetType, Transaction } from './types'
 
@@ -188,6 +189,54 @@ function Portfolio({stats,transactions,onAdd}:{stats:{invested:number,current:nu
 
 function Profile({user,initials,onSignOut}:{user:AuthUser,initials:string,onSignOut:()=>Promise<void>}) { return <><div className="page-heading"><div><p className="eyebrow">TU CUENTA</p><h1>Perfil y preferencias</h1><p>Personaliza la experiencia a tu manera.</p></div></div><div className="profile-grid"><div className="card profile-card">{user.photoURL ? <img className="big-avatar avatar-photo" src={user.photoURL} alt="" referrerPolicy="no-referrer"/> : <div className="big-avatar">{initials}</div>}<div><h2>{user.displayName}</h2><p>{user.email}</p><span>España · EUR</span></div><button className="signout-button" onClick={onSignOut}><LogOut/>Cerrar sesión</button></div><div className="card settings-card"><h2>Preferencias</h2><label>Moneda principal<select defaultValue="EUR"><option>EUR — Euro</option><option>USD — Dólar</option></select></label><label>Mercado nacional<select defaultValue="España"><option>España</option><option>Estados Unidos</option></select></label><label className="toggle-row"><div><strong>Resumen semanal</strong><span>Recibe los movimientos más importantes</span></div><input type="checkbox" defaultChecked/></label><label className="toggle-row"><div><strong>Alertas de cartera</strong><span>Avisos sobre variaciones relevantes</span></div><input type="checkbox" defaultChecked/></label></div></div></> }
 
-function TransactionForm({onClose,onAdd}:{onClose:()=>void,onAdd:(t:Transaction)=>void}) { const [type,setType]=useState<AssetType>('Fondo'); const submit=(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const d=new FormData(e.currentTarget);onAdd({id:crypto.randomUUID(),assetName:String(d.get('name')),symbol:String(d.get('symbol')),isin:String(d.get('isin')||''),type,units:Number(d.get('units')),purchasePrice:Number(d.get('price')),currentPrice:Number(d.get('currentPrice')),purchaseDate:String(d.get('date')),currency:'EUR'})}; return <div className="modal-backdrop" onMouseDown={e=>e.target===e.currentTarget&&onClose()}><form className="modal" onSubmit={submit}><div className="modal-title"><div><p className="eyebrow">NUEVA POSICIÓN</p><h2>Añadir operación</h2></div><button type="button" onClick={onClose}><X/></button></div><label>Tipo de producto<div className="type-tabs">{(['Fondo','ETF','Acción'] as AssetType[]).map(x=><button type="button" key={x} className={type===x?'selected':''} onClick={()=>setType(x)}>{x}</button>)}</div></label><div className="form-grid"><label className="wide">Nombre del producto<input name="name" required placeholder="Nombre del fondo, ETF o acción"/></label><label>Símbolo<input name="symbol" required placeholder="Ticker o código"/></label><label>ISIN <span>(opcional)</span><input name="isin" placeholder="ES... / IE..."/></label><label>Fecha de compra<input name="date" type="date" required/></label><label>Participaciones<input name="units" type="number" step="any" min="0" required/></label><label>Precio de compra (€)<input name="price" type="number" step="any" min="0" required/></label><label>Precio actual (€)<input name="currentPrice" type="number" step="any" min="0" required/></label></div><p className="form-note">En esta primera versión puedes indicar el precio. La consulta automática se activará al conectar el proveedor de datos.</p><div className="modal-actions"><button type="button" onClick={onClose}>Cancelar</button><button className="primary" type="submit">Guardar operación</button></div></form></div> }
+function TransactionForm({onClose,onAdd}:{onClose:()=>void,onAdd:(t:Transaction)=>void}) {
+  const [type,setType]=useState<AssetType>('Fondo')
+  const [query,setQuery]=useState('')
+  const [symbol,setSymbol]=useState('')
+  const [isin,setIsin]=useState('')
+  const [selected,setSelected]=useState<AssetSuggestion|null>(null)
+  const [searchOpen,setSearchOpen]=useState(false)
+  const suggestions=useMemo(()=>findAssets(query),[query])
+
+  const selectAsset=(asset:AssetSuggestion)=>{
+    setSelected(asset)
+    setQuery(asset.name)
+    setSymbol(asset.symbol)
+    setIsin(asset.isin)
+    setType(asset.type)
+    setSearchOpen(false)
+  }
+
+  const changeQuery=(value:string)=>{
+    setQuery(value)
+    setSelected(null)
+    setSearchOpen(true)
+  }
+
+  const submit=(e:React.FormEvent<HTMLFormElement>)=>{
+    e.preventDefault()
+    const d=new FormData(e.currentTarget)
+    onAdd({id:crypto.randomUUID(),assetName:query.trim(),symbol:symbol.trim(),isin:isin.trim(),type,units:Number(d.get('units')),purchasePrice:Number(d.get('price')),currentPrice:Number(d.get('currentPrice')),purchaseDate:String(d.get('date')),currency:'EUR'})
+  }
+
+  const canSuggest=query.trim().length>=3&&!selected
+  return <div className="modal-backdrop" onMouseDown={e=>e.target===e.currentTarget&&onClose()}><form className="modal asset-modal" onSubmit={submit}>
+    <div className="modal-title"><div><p className="eyebrow">NUEVA INVERSIÓN</p><h2>Añadir activo</h2><span>Busca o introduce el producto manualmente.</span></div><button type="button" onClick={onClose}><X/></button></div>
+    <div className="asset-search-wrap">
+      <label htmlFor="asset-search">Buscar activo</label>
+      <div className={searchOpen&&canSuggest?'asset-search active':'asset-search'}><Search/><input id="asset-search" name="name" value={query} onChange={e=>changeQuery(e.target.value)} onFocus={()=>setSearchOpen(true)} autoComplete="off" required placeholder="Nombre, ticker o ISIN"/><span>{query.trim().length}/3</span></div>
+      {searchOpen&&canSuggest&&<div className="asset-suggestions" role="listbox">
+        <div className="suggestion-caption"><span>Coincidencias verificadas</span><small>OpenFIGI</small></div>
+        {suggestions.length>0?suggestions.map(asset=><button type="button" role="option" key={asset.isin} onMouseDown={e=>e.preventDefault()} onClick={()=>selectAsset(asset)}><div className={`suggestion-icon ${asset.type.toLowerCase()}`}>{asset.type[0]}</div><div><strong>{asset.name}</strong><span>{asset.symbol} · {asset.isin}</span></div><small>{asset.type}<br/>{asset.market} · {asset.currency}</small></button>):<div className="no-suggestions"><Search/><div><strong>No está en el catálogo</strong><span>Puedes seguir y completar los datos manualmente.</span></div></div>}
+      </div>}
+      {!canSuggest&&!selected&&<p className="search-hint">Escribe al menos 3 caracteres para ver coincidencias.</p>}
+      {selected&&<div className="selected-asset"><ShieldCheck/><div><strong>Activo identificado</strong><span>{selected.symbol} · {selected.isin} · {selected.market}</span></div><button type="button" onClick={()=>{setSelected(null);setSearchOpen(true)}}>Cambiar</button></div>}
+    </div>
+    <label className="product-type-label">Tipo de producto<div className="type-tabs">{(['Fondo','ETF','Acción'] as AssetType[]).map(x=><button type="button" key={x} className={type===x?'selected':''} onClick={()=>setType(x)}>{x}</button>)}</div></label>
+    <div className="form-grid asset-details"><label>Símbolo<input name="symbol" value={symbol} onChange={e=>setSymbol(e.target.value)} required placeholder="Ticker o código"/></label><label>ISIN <span>(opcional)</span><input name="isin" value={isin} onChange={e=>setIsin(e.target.value)} placeholder="ES... / IE..."/></label><label>Fecha de compra<input name="date" type="date" required/></label><label>Participaciones<input name="units" type="number" step="any" min="0.000001" required inputMode="decimal"/></label><label>Precio de compra (EUR)<input name="price" type="number" step="any" min="0" required inputMode="decimal"/></label><label>Precio actual (EUR)<input name="currentPrice" type="number" step="any" min="0" required inputMode="decimal"/></label></div>
+    <p className="form-note"><ShieldCheck/>Los resultados solo identifican productos; no son recomendaciones de inversión. Los precios los introduces tú.</p>
+    <div className="modal-actions"><button type="button" onClick={onClose}>Cancelar</button><button className="primary" type="submit" disabled={!query.trim()||!symbol.trim()}>Guardar inversión</button></div>
+  </form></div>
+}
 
 export default App
