@@ -14,6 +14,8 @@ El primer prototipo incluye:
 - diseño adaptable a escritorio y móvil.
 - instalación como PWA desde la pantalla de inicio y caché básica sin conexión;
 - publicación automática en GitHub Pages después de cada cambio en `main`.
+- acceso mediante cuenta de Google con Firebase Authentication;
+- sesión persistente y cartera local separada por usuario.
 
 Los precios y noticias incluidos inicialmente son datos demostrativos. La arquitectura prevista conectará proveedores reales mediante Firebase Functions para que las claves privadas no lleguen al navegador.
 
@@ -45,6 +47,7 @@ La aplicación se abrirá sin la interfaz del navegador y conservará una copia 
 ## Datos y servicios previstos
 
 - **Firebase Authentication:** acceso con correo y Google.
+- **Proyecto Firebase:** `finanzas-360-antrodmar3` con Google como proveedor inicial.
 - **Cloud Firestore:** perfiles, carteras y operaciones por usuario.
 - **Firebase Functions:** proxy privado, normalización y caché de proveedores.
 - **Alpha Vantage:** primera opción gratuita para búsqueda, series diarias y noticias.

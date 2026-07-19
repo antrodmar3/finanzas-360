@@ -1,20 +1,40 @@
-import { useMemo, useState } from 'react'
-import { Bell, BookOpen, BriefcaseBusiness, ChevronDown, CircleUserRound, Landmark, LayoutDashboard, Menu, Plus, Search, Settings, TrendingUp, WalletCards, X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Bell, BookOpen, BriefcaseBusiness, ChevronDown, CircleUserRound, Landmark, LayoutDashboard, LogOut, Menu, Plus, Search, Settings, ShieldCheck, TrendingUp, X } from 'lucide-react'
 import { news, seedTransactions } from './data'
+import { observeAuth, signInWithGoogle, signOut, type AuthUser } from './firebase'
 import type { AssetType, Transaction } from './types'
 
 type Page = 'Resumen' | 'Actualidad' | 'Mi cartera' | 'Perfil'
 const money = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' })
 
 function App() {
+  const [user, setUser] = useState<AuthUser | null>(null)
+  const [authReady, setAuthReady] = useState(false)
+  const [authError, setAuthError] = useState('')
+  const [signingIn, setSigningIn] = useState(false)
   const [page, setPage] = useState<Page>('Resumen')
-  const [transactions, setTransactions] = useState<Transaction[]>(() => {
-    const stored = localStorage.getItem('finanzas360-transactions')
-    return stored ? JSON.parse(stored) : seedTransactions
-  })
+  const [transactions, setTransactions] = useState<Transaction[]>(seedTransactions)
   const [showForm, setShowForm] = useState(false)
   const [newsFilter, setNewsFilter] = useState('Todas')
   const [menuOpen, setMenuOpen] = useState(false)
+
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined
+    observeAuth((nextUser) => {
+      setUser(nextUser)
+      setAuthReady(true)
+    }).then((stop) => { unsubscribe = stop }).catch((error: Error) => {
+      setAuthError(error.message)
+      setAuthReady(true)
+    })
+    return () => unsubscribe?.()
+  }, [])
+
+  useEffect(() => {
+    if (!user) return
+    const stored = localStorage.getItem(`finanzas360-transactions:${user.uid}`)
+    setTransactions(stored ? JSON.parse(stored) : seedTransactions)
+  }, [user])
 
   const stats = useMemo(() => {
     const invested = transactions.reduce((sum, t) => sum + t.units * t.purchasePrice, 0)
@@ -25,9 +45,30 @@ function App() {
   const addTransaction = (transaction: Transaction) => {
     const next = [...transactions, transaction]
     setTransactions(next)
-    localStorage.setItem('finanzas360-transactions', JSON.stringify(next))
+    localStorage.setItem(`finanzas360-transactions:${user?.uid}`, JSON.stringify(next))
     setShowForm(false)
   }
+
+  const handleGoogleLogin = async () => {
+    setSigningIn(true)
+    setAuthError('')
+    try {
+      await signInWithGoogle()
+    } catch (error) {
+      const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : ''
+      if (code !== 'auth/popup-closed-by-user' && code !== 'auth/cancelled-popup-request') {
+        setAuthError('No se ha podido iniciar sesión con Google. Inténtalo de nuevo.')
+      }
+    } finally {
+      setSigningIn(false)
+    }
+  }
+
+  if (!authReady) return <AuthLoading />
+  if (!user) return <LoginScreen onLogin={handleGoogleLogin} loading={signingIn} error={authError} />
+
+  const firstName = user.displayName.split(' ')[0]
+  const initials = user.displayName.split(/\s+/).map(part => part[0]).slice(0, 2).join('').toUpperCase()
 
   return <div className="app-shell">
     <aside className={menuOpen ? 'sidebar open' : 'sidebar'}>
@@ -51,26 +92,50 @@ function App() {
         <button className="menu-button" onClick={() => setMenuOpen(true)}><Menu/></button>
         <div className="search"><Search size={18}/><input placeholder="Buscar activos, fondos o noticias..."/><kbd>⌘ K</kbd></div>
         <button className="icon-button"><Bell size={20}/><i/></button>
-        <div className="user"><div className="avatar">AM</div><span>Antonio M.</span><ChevronDown size={16}/></div>
+        <button className="user" onClick={() => setPage('Perfil')}>{user.photoURL ? <img className="avatar avatar-photo" src={user.photoURL} alt="" referrerPolicy="no-referrer"/> : <div className="avatar">{initials}</div>}<span>{user.displayName}</span><ChevronDown size={16}/></button>
       </header>
       <div className="page-content">
-        {page === 'Resumen' && <Dashboard stats={stats} transactions={transactions} setPage={setPage} setShowForm={setShowForm}/>} 
+        {page === 'Resumen' && <Dashboard firstName={firstName} stats={stats} transactions={transactions} setPage={setPage} setShowForm={setShowForm}/>}
         {page === 'Actualidad' && <NewsPage filter={newsFilter} setFilter={setNewsFilter}/>} 
         {page === 'Mi cartera' && <Portfolio stats={stats} transactions={transactions} onAdd={() => setShowForm(true)}/>} 
-        {page === 'Perfil' && <Profile/>}
+        {page === 'Perfil' && <Profile user={user} initials={initials} onSignOut={signOut}/>}
       </div>
     </main>
     {showForm && <TransactionForm onClose={() => setShowForm(false)} onAdd={addTransaction}/>} 
   </div>
 }
 
+function AuthLoading() {
+  return <div className="auth-screen auth-loading"><div className="auth-logo"><TrendingUp/></div><strong>Finanzas 360</strong><div className="auth-spinner"/></div>
+}
+
+function LoginScreen({onLogin,loading,error}:{onLogin:()=>void,loading:boolean,error:string}) {
+  return <main className="auth-screen">
+    <div className="auth-background"><i/><i/><i/></div>
+    <section className="login-card">
+      <div className="login-brand"><div className="auth-logo"><TrendingUp/></div><div><strong>Finanzas</strong><span>360</span></div></div>
+      <div className="login-copy"><p className="eyebrow">TU PATRIMONIO, MÁS CLARO</p><h1>Todo lo que necesitas para seguir tus inversiones.</h1><p>Noticias, fondos, ETF y acciones reunidos en un único lugar.</p></div>
+      <div className="login-preview" aria-hidden="true"><div><span>Valor de la cartera</span><strong>Tu patrimonio</strong><small>Siempre actualizado</small></div><TrendingUp/></div>
+      <button className="google-button" onClick={onLogin} disabled={loading}>
+        {loading ? <span className="button-spinner"/> : <GoogleMark/>}
+        {loading ? 'Conectando con Google…' : 'Continuar con Google'}
+      </button>
+      {error && <p className="auth-error">{error}</p>}
+      <div className="login-security"><ShieldCheck/><span>Acceso seguro mediante Google. No compartimos tus datos.</span></div>
+      <p className="login-terms">Al continuar aceptas usar Finanzas 360 como herramienta informativa, no como asesoramiento financiero.</p>
+    </section>
+  </main>
+}
+
+function GoogleMark() { return <svg className="google-mark" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M21.6 12.23c0-.71-.06-1.4-.18-2.07H12v3.91h5.38a4.6 4.6 0 0 1-2 3.02v2.54h3.24c1.9-1.75 2.98-4.33 2.98-7.4Z"/><path fill="#34A853" d="M12 22c2.7 0 4.97-.9 6.62-2.37l-3.24-2.54c-.9.6-2.05.96-3.38.96-2.61 0-4.82-1.76-5.61-4.13H3.04v2.62A10 10 0 0 0 12 22Z"/><path fill="#FBBC05" d="M6.39 13.92A6.02 6.02 0 0 1 6.07 12c0-.67.12-1.32.32-1.92V7.46H3.04A10 10 0 0 0 2 12c0 1.62.39 3.15 1.04 4.54l3.35-2.62Z"/><path fill="#EA4335" d="M12 5.95c1.47 0 2.79.5 3.83 1.5L18.7 4.6A9.64 9.64 0 0 0 12 2a10 10 0 0 0-8.96 5.46l3.35 2.62C7.18 7.71 9.39 5.95 12 5.95Z"/></svg> }
+
 function Nav({icon,label,active,onClick}:{icon:React.ReactNode,label:string,active:boolean,onClick:()=>void}) {
   return <button className={active ? 'nav-item active' : 'nav-item'} onClick={onClick}>{icon}<span>{label}</span></button>
 }
 
-function Dashboard({stats,transactions,setPage,setShowForm}:{stats:{invested:number,current:number,profit:number,returnPct:number},transactions:Transaction[],setPage:(p:Page)=>void,setShowForm:(v:boolean)=>void}) {
+function Dashboard({firstName,stats,transactions,setPage,setShowForm}:{firstName:string,stats:{invested:number,current:number,profit:number,returnPct:number},transactions:Transaction[],setPage:(p:Page)=>void,setShowForm:(v:boolean)=>void}) {
   return <>
-    <div className="welcome"><div><p className="eyebrow">DOMINGO, 19 DE JULIO</p><h1>Buenos días, Antonio</h1><p>Esta es la situación de tus inversiones hoy.</p></div><button className="primary" onClick={() => setShowForm(true)}><Plus/>Añadir operación</button></div>
+    <div className="welcome"><div><p className="eyebrow">DOMINGO, 19 DE JULIO</p><h1>Buenos días, {firstName}</h1><p>Esta es la situación de tus inversiones hoy.</p></div><button className="primary" onClick={() => setShowForm(true)}><Plus/>Añadir operación</button></div>
     <section className="metric-grid">
       <Metric label="Valor de la cartera" value={money.format(stats.current)} detail={`${stats.returnPct.toFixed(2)}% rentabilidad total`} positive />
       <Metric label="Capital invertido" value={money.format(stats.invested)} detail={`${transactions.length} posiciones`} />
@@ -102,7 +167,7 @@ function Market({label,value,change,negative}:{label:string,value:string,change:
 
 function Portfolio({stats,transactions,onAdd}:{stats:{invested:number,current:number,profit:number,returnPct:number},transactions:Transaction[],onAdd:()=>void}) { return <><div className="page-heading portfolio-heading"><div><p className="eyebrow">PATRIMONIO</p><h1>Mi cartera</h1><p>Controla tus posiciones y su rentabilidad.</p></div><button className="primary" onClick={onAdd}><Plus/>Añadir operación</button></div><section className="metric-grid three"><Metric label="Valor actual" value={money.format(stats.current)} detail={`${stats.returnPct.toFixed(2)}% total`} positive/><Metric label="Invertido" value={money.format(stats.invested)} detail={`${transactions.length} posiciones`}/><Metric label="Resultado" value={money.format(stats.profit)} detail="Ganancia no realizada" positive/></section><div className="card portfolio-table"><div className="table-toolbar"><h2>Posiciones</h2><div className="table-search"><Search/><input placeholder="Buscar posición"/></div></div><div className="table-scroll"><table><thead><tr><th>Producto</th><th>Tipo</th><th>Compra</th><th>Valor actual</th><th>Rentabilidad</th></tr></thead><tbody>{transactions.map(t=>{const invested=t.units*t.purchasePrice,current=t.units*t.currentPrice,ret=(current/invested-1)*100;return <tr key={t.id}><td><strong>{t.assetName}</strong><small>{t.symbol}{t.isin?` · ${t.isin}`:''}</small></td><td><span className="type-pill">{t.type}</span></td><td><strong>{money.format(invested)}</strong><small>{t.units} participaciones · {new Date(t.purchaseDate).toLocaleDateString('es-ES')}</small></td><td><strong>{money.format(current)}</strong><small>{money.format(t.currentPrice)} / ud.</small></td><td><strong className="positive">+{money.format(current-invested)}</strong><small className="positive">+{ret.toFixed(2)}%</small></td></tr>})}</tbody></table></div></div></> }
 
-function Profile() { return <><div className="page-heading"><div><p className="eyebrow">TU CUENTA</p><h1>Perfil y preferencias</h1><p>Personaliza la experiencia a tu manera.</p></div></div><div className="profile-grid"><div className="card profile-card"><div className="big-avatar">AM</div><div><h2>Antonio M.</h2><p>Inversor particular</p><span>España · EUR</span></div><button>Editar perfil</button></div><div className="card settings-card"><h2>Preferencias</h2><label>Moneda principal<select defaultValue="EUR"><option>EUR — Euro</option><option>USD — Dólar</option></select></label><label>Mercado nacional<select defaultValue="España"><option>España</option><option>Estados Unidos</option></select></label><label className="toggle-row"><div><strong>Resumen semanal</strong><span>Recibe los movimientos más importantes</span></div><input type="checkbox" defaultChecked/></label><label className="toggle-row"><div><strong>Alertas de cartera</strong><span>Avisos sobre variaciones relevantes</span></div><input type="checkbox" defaultChecked/></label></div></div></> }
+function Profile({user,initials,onSignOut}:{user:AuthUser,initials:string,onSignOut:()=>Promise<void>}) { return <><div className="page-heading"><div><p className="eyebrow">TU CUENTA</p><h1>Perfil y preferencias</h1><p>Personaliza la experiencia a tu manera.</p></div></div><div className="profile-grid"><div className="card profile-card">{user.photoURL ? <img className="big-avatar avatar-photo" src={user.photoURL} alt="" referrerPolicy="no-referrer"/> : <div className="big-avatar">{initials}</div>}<div><h2>{user.displayName}</h2><p>{user.email}</p><span>España · EUR</span></div><button className="signout-button" onClick={onSignOut}><LogOut/>Cerrar sesión</button></div><div className="card settings-card"><h2>Preferencias</h2><label>Moneda principal<select defaultValue="EUR"><option>EUR — Euro</option><option>USD — Dólar</option></select></label><label>Mercado nacional<select defaultValue="España"><option>España</option><option>Estados Unidos</option></select></label><label className="toggle-row"><div><strong>Resumen semanal</strong><span>Recibe los movimientos más importantes</span></div><input type="checkbox" defaultChecked/></label><label className="toggle-row"><div><strong>Alertas de cartera</strong><span>Avisos sobre variaciones relevantes</span></div><input type="checkbox" defaultChecked/></label></div></div></> }
 
 function TransactionForm({onClose,onAdd}:{onClose:()=>void,onAdd:(t:Transaction)=>void}) { const [type,setType]=useState<AssetType>('Fondo'); const submit=(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();const d=new FormData(e.currentTarget);onAdd({id:crypto.randomUUID(),assetName:String(d.get('name')),symbol:String(d.get('symbol')),isin:String(d.get('isin')||''),type,units:Number(d.get('units')),purchasePrice:Number(d.get('price')),currentPrice:Number(d.get('currentPrice')),purchaseDate:String(d.get('date')),currency:'EUR'})}; return <div className="modal-backdrop" onMouseDown={e=>e.target===e.currentTarget&&onClose()}><form className="modal" onSubmit={submit}><div className="modal-title"><div><p className="eyebrow">NUEVA POSICIÓN</p><h2>Añadir operación</h2></div><button type="button" onClick={onClose}><X/></button></div><label>Tipo de producto<div className="type-tabs">{(['Fondo','ETF','Acción'] as AssetType[]).map(x=><button type="button" key={x} className={type===x?'selected':''} onClick={()=>setType(x)}>{x}</button>)}</div></label><div className="form-grid"><label className="wide">Nombre del producto<input name="name" required placeholder="Ej. Vanguard Global Stock Index"/></label><label>Símbolo<input name="symbol" required placeholder="Ticker o código"/></label><label>ISIN <span>(opcional)</span><input name="isin" placeholder="ES... / IE..."/></label><label>Fecha de compra<input name="date" type="date" required/></label><label>Participaciones<input name="units" type="number" step="any" min="0" required/></label><label>Precio de compra (€)<input name="price" type="number" step="any" min="0" required/></label><label>Precio actual (€)<input name="currentPrice" type="number" step="any" min="0" required/></label></div><p className="form-note">En esta primera versión puedes indicar el precio. La consulta automática se activará al conectar el proveedor de datos.</p><div className="modal-actions"><button type="button" onClick={onClose}>Cancelar</button><button className="primary" type="submit">Guardar operación</button></div></form></div> }
 
