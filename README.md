@@ -17,7 +17,7 @@ El primer prototipo incluye:
 - acceso mediante cuenta de Google con Firebase Authentication;
 - sesión persistente y cartera local separada por usuario.
 
-Los precios y noticias incluidos inicialmente son datos demostrativos. La arquitectura prevista conectará proveedores reales mediante Firebase Functions para que las claves privadas no lleguen al navegador.
+La aplicación no incluye posiciones, rentabilidades, noticias ni cotizaciones de demostración. Arranca vacía y solo muestra datos introducidos por el usuario o procedentes de proveedores reales.
 
 ## Desarrollo local
 
